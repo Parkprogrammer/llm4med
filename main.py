@@ -23,4 +23,4 @@ if __name__ == "__main__":
     trainer = RecommenderTrainer(recommender_model, tokenizer, data, device)
     trainer.prepare_dataset()
     trainer.train()
-    trainer.save_model("path/to/save")
+    trainer.save_model("./train")
