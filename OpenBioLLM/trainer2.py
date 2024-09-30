@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import get_linear_schedule_with_warmup
 import bitsandbytes as bnb
-from qlora import QLoRAWrapper
+from OpenBioLLM.qlora2 import QLoRAWrapper
 
 class RecommenderDataset(Dataset):
     
