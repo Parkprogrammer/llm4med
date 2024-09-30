@@ -126,10 +126,10 @@ if __name__ == "__main__":
     # input_text = "회사 데이터"
     # embeddings = get_embeddings(input_text)
     
-    # main()
+    main()
     # test()
     
-    all_embeddings_tensor = torch.load('./data/all_embeddings.pt')
+    # all_embeddings_tensor = torch.load('./data/all_embeddings.pt')
     
     # Check the size of the tensor
     print("The size of the loaded tensor is:", all_embeddings_tensor.size())

@@ -8,7 +8,7 @@ STAGE_1_TEMPLATE = """Analyze the following patient information:
 Based on this information, summarize the patient's main health issues and areas requiring management."""
 
 STAGE_2_TEMPLATE = """Based on the patient analysis from Stage 1, propose specific management plans for the following areas:
-1. Comprehensive diabetes management
+1. Comprehensive disease management
 2. Individual management strategies for each potential complication
 3. Recommendations for lifestyle improvements
 4. Regular check-up and monitoring plan

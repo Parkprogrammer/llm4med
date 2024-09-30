@@ -3,7 +3,7 @@ from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
 # TRANSFORMERS_CACHE 환경 변수 설정
-os.environ['TRANSFORMERS_CACHE'] = '/data/huggingface_cache'
+os.environ['HF_HOME'] = '/data/huggingface_cache'
 
 def load_model_and_tokenizer():
     model_name = "TsinghuaC3I/Llama-3-8B-UltraMedical"

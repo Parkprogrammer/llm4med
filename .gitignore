@@ -1,3 +1,7 @@
 data/
 
 .cache/
+
+.offload_weights/
+
+.saved_model/

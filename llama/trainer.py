@@ -2,13 +2,19 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import get_linear_schedule_with_warmup
 import bitsandbytes as bnb
-from qlora import QLoRAWrapper
+from .qlora import QLoRAWrapper
+import torch.nn.functional as F
+from .template import STAGE_1_TEMPLATE, STAGE_2_TEMPLATE, STAGE_3_TEMPLATE
+import os
+
+os.environ['HF_HOME'] = '/data/transformer_cache'
 
 class RecommenderDataset(Dataset):
     
-    def __init__(self, data, tokenizer, add_token=False, new_token="[RECOMMEND]", max_length=512):
+    def __init__(self, data, tokenizer, recommendation_embeddings, add_token=False, new_token="[RECOMMEND]", max_length=512):
         self.data = data
         self.tokenizer = tokenizer
+        self.recommendation_embeddings = recommendation_embeddings
         self.add_token = add_token
         self.new_token = new_token
         self.max_length = max_length
@@ -18,14 +24,58 @@ class RecommenderDataset(Dataset):
 
     # TODO: Need to change the Dataset item in the form of template
     def __getitem__(self, idx):
-        item = self.data[idx]
-        if self.add_token:
-            text = item["preferences"] + f" {self.new_token} " + item["recommendation"]
-        else:
-            text = item["preferences"] + " " + item["recommendation"]
+        try:
+            item = self.data.iloc[idx] 
+        except KeyError:
+            raise IndexError(f"Index {idx} out of range for dataset of length {len(self)}")
         
-        encodings = self.tokenizer(text, truncation=True, padding='max_length', max_length=self.max_length, return_tensors="pt")
-        return {key: val.squeeze(0) for key, val in encodings.items()}
+        # Stage 1: Patient Analysis
+        stage_1_input = STAGE_1_TEMPLATE.format(
+            disease_classification=item['disease_classification'],
+            departments=item['departments'],
+            systems=item['systems'],
+            symptoms_complications=item['symptoms_complications'],
+            gender=item['gender'],
+            age=item['age'],
+            bmi=item['bmi']
+        )
+        
+        # process this through the model to get stage_1_output
+        stage_1_output = "STAGE_1_OUTPUT_PLACEHOLDER"
+        
+        # Stage 2: Management Plan
+        stage_2_input = f"{stage_1_input}\n\n{stage_1_output}\n\n{STAGE_2_TEMPLATE}"
+        
+        # process this through the model to get stage_2_output
+        stage_2_output = "STAGE_2_OUTPUT_PLACEHOLDER"
+        
+        
+        content_list = []
+        for i in range(idx, min(idx + 5, len(self.data))):
+            content = self.data[i].get('top-1(ENG)', '')
+            if content:
+                content_list.append(content)
+                
+        content_list += [''] * (5 - len(content_list))
+        content_list_str = ', '.join(content_list)
+        
+        # Stage 3: Content Recommendation
+        stage_3_input = f"{stage_1_input}\n\n{stage_1_output}\n\n{stage_2_input}\n\n{stage_2_output}\n\n{STAGE_3_TEMPLATE.format(content_list=content_list_str)}"
+        
+        if self.add_token:
+            stage_3_input += f" {self.new_token} "
+        
+        encodings = self.tokenizer(stage_3_input, truncation=True, padding='max_length', max_length=self.max_length, return_tensors="pt")
+        
+        # return {
+        #     **{key: val.squeeze(0) for key, val in encodings.items()},
+        #     'recommendation_embeddings': self.recommendation_embeddings[idx],
+        #     'labels': torch.tensor(item.get('label', 0), dtype=torch.long)
+        # }
+        return {
+            **{key: val.squeeze(0) for key, val in encodings.items()},
+            'recommendation_embeddings': self.recommendation_embeddings[idx],  # 이는 40x768 형태여야 합니다
+        }
     
 class RecommenderTrainer:
     
@@ -41,8 +91,10 @@ class RecommenderTrainer:
     def prepare_model_for_training(self):
         self.model = self.qlora_wrapper.prepare_model(self.model)
 
-    def prepare_dataset(self):
-        self.dataset = RecommenderDataset(self.data, self.tokenizer, self.tokenizer.add_token, self.tokenizer.new_token)
+    def prepare_dataset(self, csv_file_path, recommendation_embeddings):
+        # self.dataset = RecommenderDataset(self.data, self.tokenizer, self.tokenizer.add_token, self.tokenizer.new_token)
+        # self.dataloader = DataLoader(self.dataset, batch_size=12, shuffle=True)
+        self.dataset = RecommenderDataset(self.data, self.tokenizer, recommendation_embeddings)
         self.dataloader = DataLoader(self.dataset, batch_size=12, shuffle=True)
         # NOTE: Need to change the batch_size(It was actually set to in a large dataset 12), maybe add some more augmentations
     
@@ -51,26 +103,38 @@ class RecommenderTrainer:
         1. Need to change the parameter into a config yaml file
     '''
     def train(self, num_epochs=4):
-        
         self.prepare_model_for_training()
         
         optimizer = bnb.optim.AdamW8bit(self.model.parameters(), lr=0.0002)
         
         total_steps = len(self.dataloader) * num_epochs
         scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=100, num_training_steps=total_steps)
-        # NOTE: Need more detail about the warmup_steps and adjust it
         
-        # TODO : Need to add training projection layer & Output head MLP
+        criterion = torch.nn.CrossEntropyLoss()
+        
         self.model.train()
         for epoch in range(num_epochs):
+            total_loss = 0
             for batch in self.dataloader:
                 batch = {k: v.to(self.device) for k, v in batch.items()}
-                outputs = self.model(**batch)
-                loss = outputs.loss
+                
+                # Ouput Token
+                outputs = self.model(batch['input_ids'], batch['attention_mask'], batch['recommendation_embeddings'])
+                
+                # 손실 Cross_entropy
+                # outputs: [batch_size, sequence_length, vocab_size]
+                # batch['input_ids']: [batch_size, sequence_length]
+                loss = criterion(outputs.view(-1, outputs.size(-1)), batch['input_ids'].view(-1))
+                
                 loss.backward()
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
+                
+                total_loss += loss.item()
+            
+            avg_loss = total_loss / len(self.dataloader)
+            print(f"Epoch {epoch+1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
                 
     def save_model(self, path):
         # Save the model with merged weights
@@ -82,6 +146,26 @@ class RecommenderTrainer:
         # Example (pseudo-code):
         # merged_model = merge_lora_weights(self.model)
         # merged_model.save_pretrained(f"{path}/merged_model")
+        
+    def inference(self, patient_data, content_list):
+        # Stage 1: Patient Analysis
+        stage_1_input = STAGE_1_TEMPLATE.format(**patient_data)
+        stage_1_inputs = self.tokenizer(stage_1_input, return_tensors="pt", truncation=True, padding=True).to(self.device)
+        stage_1_output = self.model.generate(**stage_1_inputs)
+        stage_1_output = self.tokenizer.decode(stage_1_output[0], skip_special_tokens=True)
+
+        # Stage 2: Management Plan
+        stage_2_input = f"{stage_1_input}\n\n{stage_1_output}\n\n{STAGE_2_TEMPLATE}"
+        stage_2_inputs = self.tokenizer(stage_2_input, return_tensors="pt", truncation=True, padding=True).to(self.device)
+        stage_2_output = self.model.generate(**stage_2_inputs)
+        stage_2_output = self.tokenizer.decode(stage_2_output[0], skip_special_tokens=True)
+
+        # Stage 3: Content Recommendation
+        stage_3_input = f"{stage_1_input}\n\n{stage_1_output}\n\n{stage_2_input}\n\n{stage_2_output}\n\n{STAGE_3_TEMPLATE.format(content_list=content_list)}"
+        stage_3_inputs = self.tokenizer(stage_3_input, return_tensors="pt", truncation=True, padding=True).to(self.device)
+        stage_3_output = self.model.generate(**stage_3_inputs)
+        
+        return self.tokenizer.decode(stage_3_output[0], skip_special_tokens=True)
 
 # NOTE: After training, when loading the model for inference with VLLM:
 # 1. Load the merged model (if you merged the weights after training)
