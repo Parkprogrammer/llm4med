@@ -95,30 +95,37 @@ class RecommenderDataset(Dataset):
 
         content_list = []
         for i in range(idx, min(idx + 5, len(self.data))):
-            # i번째 행을 올바르게 가져오기 위해 iloc 사용
             content = safe_get(self.data.iloc[i], 'top-1(ENG)')
             if content:
                 content_list.append(content)
 
+        # 5개 미만인 경우 빈 문자열로 채우기
         content_list += [''] * (5 - len(content_list))
-        content_list_str = ', '.join(content_list)
 
-        # Stage 3: Content Recommendation
-        stage_3_input = f"{stage_1_input}\n\n{stage_1_output}\n\n{stage_2_input}\n\n{stage_2_output}\n\n{STAGE_3_TEMPLATE.format(content_list=content_list_str)}"
+        # 아이템과 임베딩 토큰을 번갈아가며 결합
+        combined_content_and_embeddings = []
+        for content in content_list:
+            combined_content_and_embeddings.append(f"{content} {'[EMB] ' * 40}")
+
+        combined_str = ' '.join(combined_content_and_embeddings)
+
+        # Stage 3: Content Recommendation with interleaved embedding tokens
+        stage_3_input = f"{stage_1_input}\n\n{stage_1_output}\n\n{stage_2_input}\n\n{stage_2_output}\n\n{STAGE_3_TEMPLATE.format(content_list=combined_str)}"
 
         if self.add_token:
             stage_3_input += f" {self.new_token} "
 
         encodings = self.tokenizer(stage_3_input, truncation=True, padding='max_length', max_length=self.max_length, return_tensors="pt")
 
-        # return {
-        #     **{key: val.squeeze(0) for key, val in encodings.items()},
-        #     'recommendation_embeddings': self.recommendation_embeddings[idx],
-        #     'labels': torch.tensor(item.get('label', 0), dtype=torch.long)
-        # }
+        # 임베딩 값들을 텐서로 변환
+        embeddings = torch.stack([self.recommendation_embeddings[i] for i in range(idx, min(idx + 5, len(self.data)))])
+        if embeddings.size(0) < 5:
+            padding = torch.zeros(5 - embeddings.size(0), 40, 768)
+            embeddings = torch.cat([embeddings, padding], dim=0)
+
         return {
             **{key: val.squeeze(0) for key, val in encodings.items()},
-            'recommendation_embeddings': self.recommendation_embeddings[idx],  # 이는 40x768 형태여야 합니다
+            'recommendation_embeddings': embeddings,
         }
     
 class RecommenderTrainer:

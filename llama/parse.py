@@ -23,6 +23,7 @@ class RecommenderTokenizer:
         if self.add_token:
             self.tokenizer.add_tokens([self.new_token])
             # self.model.resize_token_embeddings(len(self.tokenizer))
+        self.tokenizer.add_special_tokens({'additional_special_tokens': ['[EMB]']})
         # NOTE: This is where the actual adding token took place.
     
     def create_llm_chain(self):
