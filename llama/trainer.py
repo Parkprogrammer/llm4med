@@ -6,8 +6,16 @@ from .qlora import QLoRAWrapper
 import torch.nn.functional as F
 from .template import STAGE_1_TEMPLATE, STAGE_2_TEMPLATE, STAGE_3_TEMPLATE
 import os
+import pandas as pd
 
 os.environ['HF_HOME'] = '/data/transformer_cache'
+
+# Function for error-handling non-strings
+def safe_get(item, key):
+    value = item.get(key, "")
+    if pd.isna(value):
+        return ""
+    return str(value)
 
 class RecommenderDataset(Dataset):
     
@@ -29,44 +37,80 @@ class RecommenderDataset(Dataset):
         except KeyError:
             raise IndexError(f"Index {idx} out of range for dataset of length {len(self)}")
         
+        # Disease Classification (combine Primary, Secondary, Tertiary into one string)
+        disease_classification = ", ".join([
+            safe_get(item, "Disease Classification - Primary"),
+            safe_get(item, "Disease Classification - Secondary"),
+            safe_get(item, "Disease Classification - Tertiary")
+        ])
+
+        # Departments (combine Main and Sub departments)
+        departments = ", ".join([
+            safe_get(item, "Department - Main"),
+            safe_get(item, "Department - Sub")
+        ])
+
+        # Systems (combine all System columns)
+        systems = ", ".join([
+            safe_get(item, "System"),
+            safe_get(item, "System.1"),
+            safe_get(item, "System.2"),
+            safe_get(item, "System.3"),
+            safe_get(item, "System.4")
+        ])
+
+        # Symptoms/Complications (combine all Disease Name columns)
+        symptoms_complications = ", ".join([
+            safe_get(item, "Disease Name"),
+            safe_get(item, "Disease Name.1"),
+            safe_get(item, "Disease Name.2"),
+            safe_get(item, "Disease Name.3"),
+            safe_get(item, "Disease Name.4")
+        ])
+
+        # General Characteristics
+        gender = safe_get(item, "Gender")
+        age = safe_get(item, "Age")
+        bmi = safe_get(item, "BMI")
+
         # Stage 1: Patient Analysis
         stage_1_input = STAGE_1_TEMPLATE.format(
-            disease_classification=item['disease_classification'],
-            departments=item['departments'],
-            systems=item['systems'],
-            symptoms_complications=item['symptoms_complications'],
-            gender=item['gender'],
-            age=item['age'],
-            bmi=item['bmi']
+            disease_classification=disease_classification,
+            departments=departments,
+            systems=systems,
+            symptoms_complications=symptoms_complications,
+            gender=gender,
+            age=age,
+            bmi=bmi
         )
-        
+
         # process this through the model to get stage_1_output
         stage_1_output = "STAGE_1_OUTPUT_PLACEHOLDER"
-        
+
         # Stage 2: Management Plan
         stage_2_input = f"{stage_1_input}\n\n{stage_1_output}\n\n{STAGE_2_TEMPLATE}"
-        
+
         # process this through the model to get stage_2_output
         stage_2_output = "STAGE_2_OUTPUT_PLACEHOLDER"
-        
-        
+
         content_list = []
         for i in range(idx, min(idx + 5, len(self.data))):
-            content = self.data[i].get('top-1(ENG)', '')
+            # i번째 행을 올바르게 가져오기 위해 iloc 사용
+            content = safe_get(self.data.iloc[i], 'top-1(ENG)')
             if content:
                 content_list.append(content)
-                
+
         content_list += [''] * (5 - len(content_list))
         content_list_str = ', '.join(content_list)
-        
+
         # Stage 3: Content Recommendation
         stage_3_input = f"{stage_1_input}\n\n{stage_1_output}\n\n{stage_2_input}\n\n{stage_2_output}\n\n{STAGE_3_TEMPLATE.format(content_list=content_list_str)}"
-        
+
         if self.add_token:
             stage_3_input += f" {self.new_token} "
-        
+
         encodings = self.tokenizer(stage_3_input, truncation=True, padding='max_length', max_length=self.max_length, return_tensors="pt")
-        
+
         # return {
         #     **{key: val.squeeze(0) for key, val in encodings.items()},
         #     'recommendation_embeddings': self.recommendation_embeddings[idx],
