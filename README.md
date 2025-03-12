@@ -1,6 +1,6 @@
 # LLM4Med: AI-Based Medical Educational Resource Recommendation System
 
-
+![Image](https://github.com/user-attachments/assets/ddfd6001-7fdf-4777-b764-f01e6e828421)
 
 
 ## Project Overview
