@@ -1,0 +1,16 @@
+# 환경 및 설정 파일
+.env
+ngrok_config.json
+venv/
+__pycache__/
+final_data.csv
+recommendation.csv
+
+# 개인 데이터 디렉토리 
+★콘텐츠 이미지/
+content/
+
+# 캐시 및 로그 파일
+*.log
+*.pyc
+.ipynb_checkpoints/
