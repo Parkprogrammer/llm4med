@@ -9,7 +9,7 @@ def load_model_and_tokenizer(model_id):
     saved_model_path = "./saved_model"
 
     # Hugging Face 토큰
-    hf_token = "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"  # 본인의 Hugging Face 토큰으로 변경하세요
+    hf_token = "key"  # 본인의 Hugging Face 토큰으로 변경하세요
 
     if os.path.exists(saved_model_path):
         print(f"Loading model and tokenizer from local path {saved_model_path}...")
